@@ -121,6 +121,15 @@
   .weekend-group{margin-bottom:14px;}
   .weekend-group:last-child{margin-bottom:0;}
   .session-option input{width:18px;height:18px;}
+  .scope-row{display:flex;gap:8px;margin:12px 0 2px;}
+  .scope-opt{
+    flex:1;display:flex;align-items:center;gap:7px;cursor:pointer;
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;
+    font-size:12.5px;color:var(--ink-soft);
+    text-transform:none;letter-spacing:0;margin:0;font-weight:500;
+  }
+  .scope-opt.checked{border-color:var(--brass);background:#F6EFE0;color:var(--ink);font-weight:600;}
+  .scope-opt input{width:15px;height:15px;flex:0 0 auto;accent-color:#B08D57;}
   .session-option .meta{flex:1;}
   .session-option .sday{font-weight:600;font-size:14px;}
   .session-option .sdate{font-size:12px;color:var(--ink-soft);}
@@ -1438,15 +1447,42 @@ function reportingCardHtml(recsAll){
   }
   const missing = recsAll.filter(r=>r.reported===false)
     .sort((a,b)=> b.date.localeCompare(a.date) || b.day.localeCompare(a.day) || a.shooter.localeCompare(b.shooter));
+  const missRow = r => `<div class="list-row"><span>${esc(r.shooter)}</span><span class="muted">${esc(r.prop||"\u2014")}${r.stand?` &middot; ${esc(r.stand)}`:""}</span></div>`;
+  const scope = state.reportScope === "all" ? "all" : "latest";
   let chaseHtml;
-  if(missing.length){
-    const k = `${missing[0].date}|${missing[0].day}`;
-    const chase = missing.filter(r=>`${r.date}|${r.day}`===k);
-    chaseHtml = `<div class="section-divider">Still to report &mdash; ${dayLabel(chase[0].day)} &middot; ${esc(chase[0].wk)} (${fmtDate(chase[0].date)})</div>
-      ${chase.map(r=>`<div class="list-row"><span>${esc(r.shooter)}</span><span class="muted">${esc(r.prop||"\u2014")}${r.stand?` &middot; ${esc(r.stand)}`:""}</span></div>`).join("")}
-      ${missing.length>chase.length ? `<p class="muted" style="margin:8px 0 0">${missing.length-chase.length} more still outstanding in earlier sessions in this selection.</p>` : ""}`;
-  } else {
+  if(!missing.length){
     chaseHtml = `<p class="muted" style="margin:10px 0 0">Everyone drawn in this selection logged a result.</p>`;
+  } else {
+    // group the outstanding rows by session, newest first
+    const groups = [];
+    const seen = {};
+    missing.forEach(r=>{
+      const k = `${r.date}|${r.day}`;
+      if(!seen[k]){ seen[k] = {date:r.date, day:r.day, wk:r.wk, rows:[]}; groups.push(seen[k]); }
+      seen[k].rows.push(r);
+    });
+    // Only offer the toggle when there is more than one session's worth to see.
+    const scopeRow = groups.length > 1 ? `<div class="scope-row">
+      <label class="scope-opt ${scope==="latest"?"checked":""}">
+        <input type="radio" name="reportScope" class="reportScope" value="latest" ${scope==="latest"?"checked":""}>
+        <span>Latest session (${groups[0].rows.length})</span></label>
+      <label class="scope-opt ${scope==="all"?"checked":""}">
+        <input type="radio" name="reportScope" class="reportScope" value="all" ${scope==="all"?"checked":""}>
+        <span>All outstanding (${missing.length})</span></label>
+    </div>` : "";
+    const CAP = 12; // sessions listed at once in the full view
+    const shown = scope==="all" ? groups.slice(0, CAP) : groups.slice(0, 1);
+    const body = shown.map(g=>`
+      <div class="section-divider">${dayLabel(g.day)} &middot; ${esc(g.wk)} (${fmtDate(g.date)}) &mdash; ${g.rows.length} outstanding</div>
+      ${g.rows.map(missRow).join("")}`).join("");
+    let footer = "";
+    if(scope==="all" && groups.length > CAP){
+      const rest = groups.slice(CAP).reduce((a,g)=>a+g.rows.length,0);
+      footer = `<p class="muted" style="margin:8px 0 0">${rest} more across ${groups.length-CAP} earlier sessions \u2014 narrow the filters above to reach them.</p>`;
+    } else if(scope!=="all" && groups.length > 1){
+      footer = `<p class="muted" style="margin:8px 0 0">${missing.length-groups[0].rows.length} more still outstanding in earlier sessions in this selection.</p>`;
+    }
+    chaseHtml = `<div class="section-divider">Still to report</div>${scopeRow}${body}${footer}`;
   }
   const bySh = {};
   recsAll.filter(r=>r.reported===true || r.reported===false).forEach(r=>{
@@ -1678,6 +1714,8 @@ function exportSeasonCsv(){
 
 // stats-explorer controls (delegated — no per-render wiring needed)
 document.addEventListener("change", (e)=>{
+  const scopeRadio = e.target.closest(".reportScope");
+  if(scopeRadio){ state.reportScope = scopeRadio.value; render(); return; }
   const sel = e.target.closest(".statsFilter");
   if(!sel) return;
   const f = state.statsFilter;
